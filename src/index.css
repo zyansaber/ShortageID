@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 25px;
+  transition: all 0.3s;
+  background-color: rgba(106, 115, 125, 0.2);
+  &:hover {
+    background-color: rgba(106, 115, 125, 0.27);
+  }
+}
+
+::-webkit-scrollbar-corner {
+  display: none;
+}
+
+/* Print styles for PDF */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    color-adjust: exact;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-break-before {
+    page-break-before: always;
+  }
+  
+  .print-break-after {
+    page-break-after: always;
+  }
+  
+  /* Hide sidebar and header when printing */
+  nav, header {
+    display: none !important;
+  }
+  
+  main {
+    margin: 0 !important;
+    padding: 1rem !important;
+  }
+  
+  /* Ensure table fits on page */
+  table {
+    font-size: 12px;
+  }
+  
+  /* Adjust colors for print */
+  .bg-gray-50 {
+    background-color: #f9fafb !important;
+  }
+  
+  .bg-blue-50 {
+    background-color: #eff6ff !important;
+  }
+  
+  .bg-green-50 {
+    background-color: #f0fdf4 !important;
+  }
+  
+  .bg-red-50 {
+    background-color: #fef2f2 !important;
+  }
+}
