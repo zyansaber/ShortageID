@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, CheckCircle, Calendar, Printer, Package } from 'lucide-react';
+import { Search, Filter, Plus, CheckCircle, Calendar, Printer, Package, Download } from 'lucide-react';
 import { firebaseHelpers } from '../firebase/config';
 
 const SummaryTable = () => {
@@ -56,8 +56,6 @@ const SummaryTable = () => {
     if (!shortage.etaHistory || shortage.etaHistory.length <= 1) {
       return 0; // No changes if no history or only initial entry
     }
-    
-    // Find first non-empty ETA entry
     let firstValidETAIndex = -1;
     for (let i = 0; i < shortage.etaHistory.length; i++) {
       if (shortage.etaHistory[i].eta && shortage.etaHistory[i].eta.trim() !== '') {
@@ -65,14 +63,31 @@ const SummaryTable = () => {
         break;
       }
     }
-    
-    // If no valid ETA found, return 0
-    if (firstValidETAIndex === -1) {
-      return 0;
-    }
-    
-    // Count changes after the first valid ETA
+    if (firstValidETAIndex === -1) return 0;
     return Math.max(0, shortage.etaHistory.length - firstValidETAIndex - 1);
+  };
+
+  // Latest ETA helper: prefer shortage.eta; fallback to last non-empty entry in etaHistory
+  const getLatestETA = (shortage) => {
+    if (shortage?.eta && String(shortage.eta).trim() !== '') return shortage.eta;
+    const hist = shortage?.etaHistory || [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const v = hist[i]?.eta;
+      if (v && String(v).trim() !== '') return v;
+    }
+    return '';
+  };
+
+  const formatDateYMD = (val) => {
+    if (!val) return '';
+    // If it's already like YYYY-MM-DD, keep it
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return String(val);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   };
 
   useEffect(() => {
@@ -85,7 +100,7 @@ const SummaryTable = () => {
           timeSpent: calculateTimeSpent(shortage),
           etaChangeCount: calculateETAChangeCount(shortage)
         }));
-        
+
         // Load images for all shortages
         shortagesList.forEach(async (shortage) => {
           if (shortage.partCode && shortage.partCode !== 'No part code' && !partImages[shortage.partCode]) {
@@ -95,12 +110,11 @@ const SummaryTable = () => {
                 setPartImages(prev => ({ ...prev, [shortage.partCode]: imageUrl }));
               }
             } catch (error) {
-              // Silently handle image loading errors
               setPartImages(prev => ({ ...prev, [shortage.partCode]: null }));
             }
           }
         });
-        
+
         setShortages(shortagesList);
       } else {
         setShortages([]);
@@ -109,10 +123,10 @@ const SummaryTable = () => {
     });
 
     return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partImages]);
 
   const calculateTimeSpent = (shortage) => {
-    // Use shortageDate if available, otherwise use createdAt
     const created = new Date(shortage.shortageDate || shortage.createdAt);
     const resolved = shortage.resolvedAt ? new Date(shortage.resolvedAt) : new Date();
     const diffTime = Math.abs(resolved - created);
@@ -203,17 +217,17 @@ const SummaryTable = () => {
 
   const handleStepClick = async (shortageId, stepId, currentStatus) => {
     if (stepId === currentStatus) return;
-    
+
     try {
-      const updates = { 
+      const updates = {
         status: stepId,
         lastUpdated: new Date().toISOString()
       };
-      
+
       if (stepId === 'received') {
         updates.resolvedAt = new Date().toISOString();
       }
-      
+
       await firebaseHelpers.updateShortage(shortageId, updates);
     } catch (error) {
       console.error('Error updating shortage status:', error);
@@ -225,8 +239,7 @@ const SummaryTable = () => {
     try {
       const shortage = shortages.find(s => s.id === shortageId);
       let etaHistory = shortage.etaHistory || [];
-      
-      // If this is the first ETA being set (no previous valid ETA), initialize history
+
       if (etaHistory.length === 0) {
         etaHistory = [{
           eta: newETA,
@@ -235,7 +248,6 @@ const SummaryTable = () => {
           isInitial: true
         }];
       } else {
-        // Add new ETA change to history
         etaHistory.push({
           eta: newETA,
           date: new Date().toISOString(),
@@ -243,7 +255,6 @@ const SummaryTable = () => {
         });
       }
 
-      // Auto-update status to ordering when ETA is set
       const updates = {
         eta: newETA,
         etaHistory: etaHistory,
@@ -252,7 +263,6 @@ const SummaryTable = () => {
       };
 
       await firebaseHelpers.updateShortage(shortageId, updates);
-      
       setEditingETA(null);
     } catch (error) {
       console.error('Error updating ETA:', error);
@@ -315,9 +325,7 @@ const SummaryTable = () => {
 
   // Get display description - use customPartName for "not found" materials
   const getDisplayDescription = (shortage) => {
-    if (shortage.customPartName) {
-      return shortage.customPartName;
-    }
+    if (shortage.customPartName) return shortage.customPartName;
     return shortage.displayName;
   };
 
@@ -325,6 +333,45 @@ const SummaryTable = () => {
   const getUniqueTeams = () => {
     const teams = [...new Set(shortages.map(s => s.assignedTeam).filter(Boolean))];
     return teams.sort();
+  };
+
+  // ======= Stats for Top Cards (based on current filtered list) =======
+  const noETACount = filteredShortages.filter(s => !getLatestETA(s)).length;
+  const notInOrderingCount = filteredShortages.filter(s => s.status !== 'ordering' && s.status !== 'received').length;
+  const totalFiltered = filteredShortages.length;
+
+  // ======= CSV Export =======
+  const escapeCSV = (val) => {
+    if (val == null) return '';
+    const s = String(val);
+    if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const exportCSV = () => {
+    const headers = ['Status', 'Latest ETA', 'Part Code', 'Description'];
+    const rows = filteredShortages.map(s => {
+      const status = getStatusLabel(s.status || '');
+      const latestETA = formatDateYMD(getLatestETA(s));
+      const partCode = s.partCode || '';
+      const desc = getDisplayDescription(s) || '';
+      return [status, latestETA, partCode, desc].map(escapeCSV).join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    a.href = url;
+    a.download = `shortages_${y}${m}${d}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (isLoading) {
@@ -337,9 +384,17 @@ const SummaryTable = () => {
 
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Summary</h1>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={exportCSV}
+            className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export CSV</span>
+          </button>
           <button
             onClick={handlePrint}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -350,6 +405,51 @@ const SummaryTable = () => {
           <div className="text-sm text-gray-500">
             {filteredShortages.length} of {shortages.length} cases
           </div>
+        </div>
+      </div>
+
+      {/* Top Big Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {/* No ETA */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center">
+            <div className="p-3 bg-orange-100 rounded-xl">
+              <Calendar className="h-6 w-6 text-orange-600" />
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">No ETA</p>
+              <p className="text-3xl font-bold text-gray-900">{noETACount}</p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">Count from current filtered list</p>
+        </div>
+
+        {/* Not in Ordering */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center">
+            <div className="p-3 bg-yellow-100 rounded-xl">
+              <Plus className="h-6 w-6 text-yellow-700" />
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Not in Ordering</p>
+              <p className="text-3xl font-bold text-gray-900">{notInOrderingCount}</p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">Status ≠ Ordering/Received</p>
+        </div>
+
+        {/* Total (Filtered) */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center">
+            <div className="p-3 bg-blue-100 rounded-xl">
+              <CheckCircle className="h-6 w-6 text-blue-700" />
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Total (Filtered)</p>
+              <p className="text-3xl font-bold text-gray-900">{totalFiltered}</p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">After all filters applied</p>
         </div>
       </div>
 
@@ -589,7 +689,7 @@ const SummaryTable = () => {
                             }}
                             className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded text-base"
                           >
-                            {shortage.eta || 'Set ETA'}
+                            {getLatestETA(shortage) || 'Set ETA'}
                             {shortage.etaChangeCount > 0 && (
                               <span className="ml-1 text-sm text-orange-600">
                                 ({shortage.etaChangeCount} changes)
@@ -636,7 +736,7 @@ const SummaryTable = () => {
                         </span>
                       </td>
                     </tr>
-                    
+
                     {/* Workflow Row */}
                     <tr>
                       <td colSpan="9" className="px-4 py-3 bg-gray-50">
@@ -646,7 +746,7 @@ const SummaryTable = () => {
                             const isCompleted = index <= currentStepIndex;
                             const isCurrent = index === currentStepIndex;
                             const IconComponent = step.icon;
-                            
+
                             return (
                               <div key={step.id} className="flex items-center">
                                 <button
@@ -664,11 +764,11 @@ const SummaryTable = () => {
                                 >
                                   <IconComponent className="h-4 w-4" />
                                 </button>
-                                
+
                                 <div className="ml-2 text-sm text-gray-600">
                                   {step.label}
                                 </div>
-                                
+
                                 {index < workflowSteps.length - 1 && (
                                   <div className={`ml-4 w-8 h-0.5 ${
                                     index < currentStepIndex ? 'bg-green-500' : 'bg-gray-300'
