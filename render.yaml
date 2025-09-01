@@ -2,7 +2,7 @@ services:
   - type: web
     name: shortage-management-webapp
     env: static
-    buildCommand: corepack enable && pnpm install && pnpm run build
+    buildCommand: corepack enable && pnpm install --no-frozen-lockfile && pnpm run build
     staticPublishPath: ./dist
     routes:
       - type: rewrite
