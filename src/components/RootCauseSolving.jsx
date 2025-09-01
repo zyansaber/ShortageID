@@ -104,22 +104,28 @@ const RootCauseSolving = () => {
     }
   };
 
+  // UPDATED: 删除 root cause（无确认弹窗，真实删除数据库对应键）
   const handleDeleteRow = async (item) => {
-    if (!confirm('Are you sure you want to delete this root cause item?')) {
-      return;
-    }
-
     try {
+      // 先读当前，待会判断是否还剩其它原因
       const shortage = await firebaseHelpers.getShortage(item.shortageId);
-      const rootCauseSolutions = shortage.rootCauseSolutions || {};
-      
-      // Remove the solution for this specific reason
-      delete rootCauseSolutions[item.reason];
+      const current = shortage?.rootCauseSolutions || {};
 
-      await firebaseHelpers.updateShortage(item.shortageId, {
-        rootCauseSolutions: rootCauseSolutions,
-        lastUpdated: new Date().toISOString()
-      });
+      // 1) 删除当前 reason（RTDB: 设置路径为 null 即删除该键）
+      const updates = {
+        [`rootCauseSolutions/${item.reason}`]: null,
+        lastUpdated: new Date().toISOString(),
+      };
+      await firebaseHelpers.updateShortage(item.shortageId, updates);
+
+      // 2) 如果删完后空了，则把整个 rootCauseSolutions 置为 null（清理空对象）
+      const remainingKeys = Object.keys(current).filter(k => k !== item.reason);
+      if (remainingKeys.length === 0) {
+        await firebaseHelpers.updateShortage(item.shortageId, {
+          rootCauseSolutions: null,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
     } catch (error) {
       console.error('Error deleting root cause item:', error);
       alert('Error deleting root cause item');
